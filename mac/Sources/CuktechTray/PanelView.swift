@@ -9,10 +9,13 @@ import CuktechCore
 final class PanelModel: ObservableObject {
     @Published var snapshot = DeviceSnapshot()
     @Published var busy = false
+    /// 面板被钉住。钉住后点外部不收起，相当于一个常驻小窗。
+    @Published var pinned = false
 
     var onReconnect: (() -> Void)?
     var onSetPort: ((Int, Bool) -> Void)?
     var onSetScene: ((Int) -> Void)?
+    var onTogglePin: ((Bool) -> Void)?
     var onQuit: (() -> Void)?
 
     func reconnect() { onReconnect?() }
@@ -25,6 +28,11 @@ final class PanelModel: ObservableObject {
     func setScene(_ mode: Int) {
         busy = true
         onSetScene?(mode)
+    }
+
+    func togglePin() {
+        pinned.toggle()
+        onTogglePin?(pinned)
     }
 }
 
@@ -72,7 +80,31 @@ struct PanelView: View {
                     .foregroundColor(Theme.dim)
             }
             .padding(.top, 2)
+
+            pinButton
         }
+    }
+
+    /// 右上角的固定按钮。没固定时点面板外面就收起；固定后当常驻窗用。
+    private var pinButton: some View {
+        Button {
+            model.togglePin()
+        } label: {
+            Image(systemName: model.pinned ? "pin.fill" : "pin")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(model.pinned ? Theme.fg : Theme.dim)
+                .rotationEffect(.degrees(model.pinned ? 0 : 45))
+                .frame(width: 22, height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(model.pinned ? Theme.cardOn : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(model.pinned ? "取消固定：点面板外面就收起" : "固定面板：切到别的 App 也不收起")
+        .padding(.top, 0)
+        .offset(y: -1)
     }
 
     private var ports: some View {
@@ -186,10 +218,17 @@ enum Theme {
     }
 }
 
-/// 面板窗口：无标题栏的浮动面板，点菜单里那一项才出现，失焦不消失。
-final class PanelController {
+/// 面板窗口：无标题栏的浮动面板。
+/// 默认「点外面就收起」——这也是菜单栏小面板的惯例；右上角钉住之后才常驻。
+final class PanelController: NSObject, NSWindowDelegate {
     let model = PanelModel()
     private var panel: NSPanel?
+
+    override init() {
+        super.init()
+        // 视图里点一下图钉 → 这里改窗口行为，别让 PanelModel 知道 NSPanel 的存在
+        model.onTogglePin = { [weak self] pinned in self?.applyPin(pinned) }
+    }
 
     func toggle(relativeTo button: NSStatusBarButton?) {
         if let p = panel, p.isVisible {
@@ -215,6 +254,19 @@ final class PanelController {
 
     func close() { panel?.orderOut(nil) }
 
+    /// 固定 = 常驻：不随 App 失活隐藏，失焦也不收。
+    private func applyPin(_ pinned: Bool) {
+        guard let win = panel else { return }
+        win.hidesOnDeactivate = !pinned
+        win.level = .floating
+    }
+
+    /// 没钉住时点到别处（别的 App、桌面、自己的别的窗口）就收起。
+    func windowDidResignKey(_ notification: Notification) {
+        guard !model.pinned else { return }
+        panel?.orderOut(nil)
+    }
+
     private func makePanel() -> NSPanel {
         let win = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 486),
                           styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
@@ -225,8 +277,10 @@ final class PanelController {
         win.isMovableByWindowBackground = true
         win.isFloatingPanel = true
         win.level = .floating
-        win.hidesOnDeactivate = false
+        win.hidesOnDeactivate = !model.pinned
+        win.becomesKeyOnlyIfNeeded = false
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        win.delegate = self
         win.contentView = NSHostingView(rootView: PanelView(model: model))
         return win
     }

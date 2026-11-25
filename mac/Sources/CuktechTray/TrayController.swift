@@ -91,14 +91,35 @@ final class TrayController: NSObject {
 
     // MARK: - 菜单栏标题
 
+    /// 关掉「菜单栏显示功率数字」时显示的那个图标。
+    /// 以前这里塞的是「瓦」这个字，挤在菜单栏里像坏掉的标签；换成闪电模板图，
+    /// 跟 App 图标上的闪电对应，深浅色菜单栏都会自动反色（isTemplate）。
+    private static let boltIcon: NSImage? = {
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        guard let img = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "酷态科功率表")?
+            .withSymbolConfiguration(cfg) else { return nil }
+        img.isTemplate = true
+        return img
+    }()
+
     private func updateTitle() {
         guard let button = statusItem.button else { return }
         let text: String
         var color = NSColor.secondaryLabelColor
 
         if !settings.showWattsInMenuBar {
-            text = "瓦"
-        } else if snapshot.connected {
+            button.image = Self.boltIcon
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.attributedTitle = NSAttributedString(string: "")
+            button.toolTip = snapshot.connected ? snapshot.headline : "酷态科 10 号 Ultra · \(snapshot.status)"
+            return
+        }
+
+        button.image = nil
+        button.imagePosition = .noImage
+
+        if snapshot.connected {
             text = snapshot.totalText
             let c = snapshot.totalColor
             color = NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1)
@@ -146,6 +167,8 @@ final class TrayController: NSObject {
         menu.addItem(.separator())
         menu.addItem(item("打开日志", #selector(openLog)))
         menu.addItem(item("显示配置文件", #selector(showConfig)))
+        menu.addItem(.separator())
+        menu.addItem(item("关于酷态科功率表…", #selector(showAbout)))
         menu.addItem(.separator())
         menu.addItem(item("退出", #selector(quit)))
 
@@ -230,6 +253,10 @@ final class TrayController: NSObject {
 
     @objc private func showConfig() {
         NSWorkspace.shared.activateFileViewerSelecting([AppSettings.fileURL])
+    }
+
+    @objc private func showAbout() {
+        AboutController.shared.show()
     }
 
     @objc private func quit() {
